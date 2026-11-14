@@ -34,6 +34,7 @@ cc_library {
         "ethernet_device.cpp",
         "ethernet_ui.cpp",
         "screen_ui.cpp",
+        "screen_ui_keyboard.cpp",
         "stub_ui.cpp",
         "ui.cpp",
         "vr_ui.cpp",

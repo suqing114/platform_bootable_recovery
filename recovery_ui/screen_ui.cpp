@@ -790,6 +790,12 @@ std::vector<std::string> ScreenRecoveryUI::GetMenuHelpMessage() const {
 // Redraws everything on the screen. Does not flip pages. Should only be called with updateMutex
 // locked.
 void ScreenRecoveryUI::draw_screen_locked() {
+  if (readline_active_) {
+    gr_color(0, 0, 0, 255);
+    gr_clear();
+    draw_readline_locked();
+    return;
+  }
   if (!show_text) {
     draw_background_locked();
     draw_foreground_locked();

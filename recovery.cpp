@@ -55,6 +55,7 @@
 #include "otautil/package.h"
 #include "otautil/paths.h"
 #include "otautil/sysutil.h"
+#include "recovery_tools.h"
 #include "recovery_ui/screen_ui.h"
 #include "recovery_ui/ui.h"
 #include "recovery_utils/battery_utils.h"
@@ -211,6 +212,7 @@ static InstallResult apply_update_menu(Device* device, Device::BuiltinAction* re
   for (;;) {
     items.clear();
     items.push_back("Apply from ADB");
+    items.push_back("Choose from /tmp or internal storage");
     VolumeManager::Instance()->getVolumeInfo(volumes);
     for (auto vol = volumes.begin(); vol != volumes.end(); /* empty */) {
       if (!vol->mMountable) {
@@ -237,8 +239,10 @@ static InstallResult apply_update_menu(Device* device, Device::BuiltinAction* re
 
     if (chosen == item_sideload) {
       status = ApplyFromAdb(device, false /* rescue_mode */, reboot_action);
+    } else if (chosen == item_sideload + 1) {
+      status = ApplyFromTmp(device);
     } else {
-      status = ApplyFromStorage(device, volumes[chosen - 1]);
+      status = ApplyFromStorage(device, volumes[chosen - 2]);
     }
     break;
   }
@@ -505,6 +509,7 @@ change_menu:
       case Device::MENU_BASE:
       case Device::MENU_WIPE:
       case Device::MENU_ADVANCED:
+      case Device::MENU_TOOLS:
         goto change_menu;
 
       case Device::REBOOT_FROM_FASTBOOT:    // Can not happen
@@ -648,6 +653,55 @@ change_menu:
         }
         break;
       }
+
+      case Device::BACKUP_PARTITIONS:
+        save_current_log = true;
+        BackupPartitions(device);
+        break;
+
+      case Device::FLASH_IMAGE:
+        save_current_log = true;
+        FlashImageToPartition(device);
+        break;
+
+      case Device::MOUNT_PARTITIONS:
+        MountPartitionsMenu(device);
+        break;
+
+      case Device::EXPORT_LOGS:
+        ExportLogs(device);
+        break;
+
+      case Device::SWITCH_SLOT:
+        save_current_log = true;
+        SwitchActiveSlot(device);
+        break;
+
+      case Device::DECRYPT_DATA_RO:
+        DecryptData(device, false);
+        break;
+
+      case Device::MOUNT_DATA_RW:
+        save_current_log = true;
+        DecryptData(device, true);
+        break;
+
+      case Device::WIPE_DALVIK:
+        save_current_log = true;
+        WipeDalvikCache(device);
+        break;
+
+      case Device::UNMOUNT_DATA:
+        UnmountData(device);
+        break;
+
+      case Device::UNLOCK_CE:
+        UnlockInternalStorage(device);
+        break;
+
+      case Device::TERMINAL:
+        TerminalMenu(device);
+        break;
 
       case Device::KEY_INTERRUPTED:
         return Device::KEY_INTERRUPTED;

@@ -34,7 +34,23 @@ static std::vector<menu_action_t> g_main_actions{
   { "Reboot system now", Device::REBOOT },
   { "Apply update", Device::APPLY_UPDATE },
   { "Factory reset", Device::MENU_WIPE },
+  { "Tools", Device::MENU_TOOLS },
   { "Advanced", Device::MENU_ADVANCED },
+};
+
+static std::vector<std::string> g_tools_header{ "Tools" };
+static std::vector<menu_action_t> g_tools_actions{
+  { "Backup partitions", Device::BACKUP_PARTITIONS },
+  { "Flash image to partition", Device::FLASH_IMAGE },
+  { "Mount partitions", Device::MOUNT_PARTITIONS },
+  { "Export logs", Device::EXPORT_LOGS },
+  { "Switch active slot", Device::SWITCH_SLOT },
+  { "Unlock internal storage (PIN)", Device::UNLOCK_CE },
+  { "Decrypt /data (read-only)", Device::DECRYPT_DATA_RO },
+  { "Mount /data read-write", Device::MOUNT_DATA_RW },
+  { "Wipe Dalvik / ART cache", Device::WIPE_DALVIK },
+  { "Unmount /data", Device::UNMOUNT_DATA },
+  { "Terminal", Device::TERMINAL },
 };
 
 static std::vector<std::string> g_advanced_header{ "Advanced options" };
@@ -105,6 +121,8 @@ const std::vector<std::string>& Device::GetMenuHeaders() {
       return g_wipe_header;
   if (current_menu_ == &g_advanced_actions)
       return g_advanced_header;
+  if (current_menu_ == &g_tools_actions)
+      return g_tools_header;
   return g_main_header;
 }
 
@@ -118,6 +136,9 @@ Device::BuiltinAction Device::InvokeMenuItem(size_t menu_position) {
         break;
       case Device::BuiltinAction::MENU_ADVANCED:
         current_menu_ = &g_advanced_actions;
+        break;
+      case Device::BuiltinAction::MENU_TOOLS:
+        current_menu_ = &g_tools_actions;
         break;
       default:
         break;

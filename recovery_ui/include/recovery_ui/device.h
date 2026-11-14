@@ -71,9 +71,22 @@ class Device {
     SHUTDOWN_FROM_FASTBOOT = 21,
     WIPE_SYSTEM = 100,
     ENABLE_ADB = 101,
+    // liuqin: TWRP-style tools (see recovery_tools.cpp).
+    BACKUP_PARTITIONS = 102,
+    FLASH_IMAGE = 103,
+    MOUNT_PARTITIONS = 104,
+    EXPORT_LOGS = 105,
+    SWITCH_SLOT = 106,
+    DECRYPT_DATA_RO = 107,
+    MOUNT_DATA_RW = 108,
+    WIPE_DALVIK = 109,
+    UNMOUNT_DATA = 110,
+    TERMINAL = 111,
+    UNLOCK_CE = 112,
     MENU_BASE = 200,
     MENU_WIPE = 202,
     MENU_ADVANCED = 203,
+    MENU_TOOLS = 204,
   };
 
   explicit Device(RecoveryUI* ui);

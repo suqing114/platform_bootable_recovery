@@ -317,6 +317,9 @@ class ScreenRecoveryUI : public RecoveryUI, public DrawInterface {
                   const std::function<int(int, bool)>& key_handler, bool refreshable) override;
   void SetTitle(const std::vector<std::string>& lines) override;
 
+  std::optional<std::string> ReadLine(const std::vector<std::string>& lines,
+                                      const std::string& prompt, bool masked) override;
+
   void KeyLongPress(int) override;
 
   void Redraw();
@@ -523,6 +526,22 @@ class ScreenRecoveryUI : public RecoveryUI, public DrawInterface {
   bool rtl_locale_;
 
   std::mutex updateMutex;
+
+  // On-screen keyboard / line editor state (screen_ui_keyboard.cpp), guarded by updateMutex.
+  void draw_readline_locked();
+  struct RlHit {
+    Point min;
+    Point max;
+    int code;
+  };
+  bool readline_active_ = false;
+  std::vector<std::string> rl_lines_;
+  std::string rl_prompt_;
+  std::string rl_input_;
+  bool rl_masked_ = false;
+  int rl_mode_ = 0;
+  int rl_scroll_ = 0;
+  std::vector<RlHit> rl_hit_;
 
   // Switch the display to active one after graphics is ready
   bool is_graphics_available;

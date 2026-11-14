@@ -148,6 +148,7 @@ cc_library_static {
 
     srcs: [
         "recovery.cpp",
+        "recovery_tools.cpp",
     ],
 
     shared_libs: [

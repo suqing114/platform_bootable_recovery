@@ -24,6 +24,7 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -241,6 +242,15 @@ class RecoveryUI {
   // --- menu display ---
 
   virtual void SetTitle(const std::vector<std::string>& lines) = 0;
+
+  // liuqin: shows |lines| (scrollback, bottom-aligned), an input line with |prompt| and an
+  // on-screen keyboard; returns the entered text, or nullopt if the user left (Exit/Esc).
+  // |masked| hides the input (passwords). UIs without a screen return nullopt.
+  virtual std::optional<std::string> ReadLine(const std::vector<std::string>& /* lines */,
+                                              const std::string& /* prompt */,
+                                              bool /* masked */) {
+    return std::nullopt;
+  }
 
   // Displays a menu with the given 'headers' and 'items'. The supplied 'key_handler' callback,
   // which is typically bound to Device::HandleMenuKey(), should return the expected action for the
