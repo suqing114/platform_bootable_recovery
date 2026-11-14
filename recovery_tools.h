@@ -56,3 +56,6 @@ void TerminalMenu(Device* device);
 // Tools -> Unlock internal storage: lock-screen PIN via the on-screen keyboard,
 // then fbe_helper unlock-ce (Gatekeeper + synthetic password -> CE key).
 void UnlockInternalStorage(Device* device);
+
+// Home -> Files: browse, view, copy/cut/paste, rename, delete, chmod, install zips.
+void FileManager(Device* device);

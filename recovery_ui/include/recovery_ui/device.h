@@ -83,10 +83,13 @@ class Device {
     UNMOUNT_DATA = 110,
     TERMINAL = 111,
     UNLOCK_CE = 112,
+    FILE_MANAGER = 113,
     MENU_BASE = 200,
     MENU_WIPE = 202,
     MENU_ADVANCED = 203,
     MENU_TOOLS = 204,
+    MENU_BACKUP = 205,
+    MENU_DATA = 206,
   };
 
   explicit Device(RecoveryUI* ui);

@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -88,6 +89,9 @@ class DrawInterface {
 };
 
 // Interface for classes that maintain the menu selection and display.
+struct GRFont;
+class TextMenu;
+
 class Menu {
  public:
   virtual ~Menu() = default;
@@ -108,6 +112,10 @@ class Menu {
   virtual size_t ItemsCount() const = 0;
   virtual bool IsMain() const = 0;
   virtual void SetMenuHeight(int height) = 0;
+  // liuqin theme: text menus are drawn by the theme (no RTTI in recovery).
+  virtual const TextMenu* AsTextMenu() const {
+    return nullptr;
+  }
 
  protected:
   Menu(size_t initial_selection, const DrawInterface& draw_func);
@@ -132,6 +140,9 @@ class TextMenu : public Menu {
   int DrawHeader(int x, int y) const override;
   int DrawItems(int x, int y, int screen_width, bool long_press) const override;
   size_t ItemsCount() const override;
+  const TextMenu* AsTextMenu() const override {
+    return this;
+  }
 
   bool IsMain() const override {
     // Main menus have no headers
@@ -542,6 +553,37 @@ class ScreenRecoveryUI : public RecoveryUI, public DrawInterface {
   int rl_mode_ = 0;
   int rl_scroll_ = 0;
   std::vector<RlHit> rl_hit_;
+
+  // liuqin theme (screen_ui_theme.cpp), guarded by updateMutex.
+  struct Rgb3 {
+    uint8_t r, g, b;
+  };
+  struct ThemeHit {
+    int x0, y0, x1, y1, item;
+  };
+  void theme_init();
+  void ScreenshotLoop();
+  bool draw_themed_menu_locked();
+  int theme_select(const Point& point);
+  int theme_status_bar(int y);
+  int theme_log_card(int min_top);
+  void theme_fill_round(int x, int y, int w, int h, int r, Rgb3 c) const;
+  void theme_card(int x, int y, int w, int h, int r, Rgb3 fill, bool outline) const;
+  void theme_text(const GRFont* font, int x, int y, const std::string& s, Rgb3 c,
+                  bool bold = false, int max_width = 0) const;
+  const GRSurface* theme_icon(const std::string& name, int size);
+  void theme_draw_icon(const std::string& name, int size, int x, int y, Rgb3 c);
+  bool theme_ready_ = false;
+  bool theme_active_ = false;
+  int theme_scroll_ = 0;
+  const GRFont* font_title_ = nullptr;
+  const GRFont* font_small_ = nullptr;
+  std::unique_ptr<GRSurface> theme_logo_;
+  std::unique_ptr<GRSurface> theme_chibi_;
+  std::unique_ptr<GRSurface> theme_head_;
+  std::map<std::string, std::unique_ptr<GRSurface>> theme_icons_;
+  std::vector<ThemeHit> theme_hits_;
+  std::thread screenshot_thread_;
 
   // Switch the display to active one after graphics is ready
   bool is_graphics_available;

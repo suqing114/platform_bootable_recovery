@@ -510,6 +510,8 @@ change_menu:
       case Device::MENU_WIPE:
       case Device::MENU_ADVANCED:
       case Device::MENU_TOOLS:
+      case Device::MENU_BACKUP:
+      case Device::MENU_DATA:
         goto change_menu;
 
       case Device::REBOOT_FROM_FASTBOOT:    // Can not happen
@@ -693,6 +695,10 @@ change_menu:
 
       case Device::UNMOUNT_DATA:
         UnmountData(device);
+        break;
+
+      case Device::FILE_MANAGER:
+        FileManager(device);
         break;
 
       case Device::UNLOCK_CE:

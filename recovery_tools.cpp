@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/klog.h>
 #include <sys/mount.h>
@@ -867,4 +868,422 @@ void UnlockInternalStorage(Device* device) {
   RunCapture({ FbeHelper(), "unlock-ce", "0" }, 120,
              [ui](const std::string& l) { ui->Print("  %s\n", l.c_str()); }, &input);
   std::fill(input.begin(), input.end(), '\0');
+}
+
+// ---------------------------------------------------------------------------
+// File manager (Files tile). Menu items use "title\tsubtitle"; the theme draws
+// the subtitle as a second line.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct Clipboard {
+  std::string path;
+  bool move = false;
+};
+Clipboard g_clip;
+
+std::string HumanSize(uint64_t b) {
+  const char* units[] = { "B", "KB", "MB", "GB", "TB" };
+  double v = static_cast<double>(b);
+  int u = 0;
+  while (v >= 1024 && u < 4) {
+    v /= 1024;
+    ++u;
+  }
+  char buf[32];
+  snprintf(buf, sizeof(buf), u == 0 ? "%.0f %s" : "%.1f %s", v, units[u]);
+  return buf;
+}
+
+std::string ModeString(mode_t m) {
+  std::string s = S_ISDIR(m) ? "d" : S_ISLNK(m) ? "l" : "-";
+  const char* rwx = "rwxrwxrwx";
+  for (int i = 0; i < 9; ++i) s += (m & (0400 >> i)) ? rwx[i] : '-';
+  return s;
+}
+
+std::string TimeString(time_t t) {
+  struct tm tm {};
+  localtime_r(&t, &tm);
+  char buf[32];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm);
+  return buf;
+}
+
+std::string JoinPath(const std::string& dir, const std::string& name) {
+  return dir == "/" ? "/" + name : dir + "/" + name;
+}
+
+std::string ParentPath(const std::string& path) {
+  if (path == "/" || path.empty()) return "/";
+  size_t pos = path.find_last_of('/');
+  return pos == 0 || pos == std::string::npos ? "/" : path.substr(0, pos);
+}
+
+bool IsDir(const std::string& path) {
+  struct stat st {};
+  return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+int Shell(RecoveryUI* ui, const std::string& cmd, int timeout_s = 600) {
+  return RunCapture({ "/system/bin/sh", "-c", cmd }, timeout_s,
+                    [ui](const std::string& l) { ui->Print("  %s\n", l.c_str()); });
+}
+
+// Files placed under /data get the owner and SELinux label of their new parent
+// (e.g. media_rw for internal storage), so Android can use them afterwards.
+void MatchParentOwnership(RecoveryUI* ui, const std::string& path) {
+  if (!android::base::StartsWith(path, "/data/")) return;
+  const std::string parent = ParentPath(path);
+  struct stat st {};
+  if (stat(parent.c_str(), &st) != 0) return;
+  Shell(ui,
+        StringPrintf("chown -R %u:%u %s; ctx=$(stat -c %%C %s) && chcon -R \"$ctx\" %s",
+                     st.st_uid, st.st_gid, ShellQuote(path).c_str(), ShellQuote(parent).c_str(),
+                     ShellQuote(path).c_str()),
+        120);
+}
+
+std::string FileSha256(const std::string& path) {
+  unique_fd fd(open(path.c_str(), O_RDONLY | O_CLOEXEC));
+  if (fd == -1) return "";
+  SHA256_CTX ctx;
+  SHA256_Init(&ctx);
+  std::vector<uint8_t> buf(1 << 20);
+  ssize_t n;
+  while ((n = TEMP_FAILURE_RETRY(read(fd.get(), buf.data(), buf.size()))) > 0) {
+    SHA256_Update(&ctx, buf.data(), n);
+  }
+  if (n < 0) return "";
+  uint8_t digest[SHA256_DIGEST_LENGTH];
+  SHA256_Final(digest, &ctx);
+  return ToHex(digest, sizeof(digest));
+}
+
+void ShowInfo(RecoveryUI* ui, const std::string& path) {
+  struct stat st {};
+  if (lstat(path.c_str(), &st) != 0) {
+    ui->Print("Cannot stat %s: %s\n", path.c_str(), strerror(errno));
+    return;
+  }
+  ui->Print("\n%s\n", path.c_str());
+  ui->Print("  %s  uid %u  gid %u  %s\n", ModeString(st.st_mode).c_str(), st.st_uid, st.st_gid,
+            TimeString(st.st_mtime).c_str());
+  if (S_ISREG(st.st_mode)) {
+    ui->Print("  %s (%llu bytes)\n", HumanSize(st.st_size).c_str(),
+              static_cast<unsigned long long>(st.st_size));
+    ui->Print("  sha256 %s\n", FileSha256(path).c_str());
+  } else if (S_ISDIR(st.st_mode)) {
+    Shell(ui, "du -sh " + ShellQuote(path) + " 2>/dev/null", 120);
+  }
+  Shell(ui, "ls -Zd " + ShellQuote(path), 10);
+}
+
+bool AskName(Device* device, const std::string& title, const std::string& where, std::string* out) {
+  auto name = device->GetUI()->ReadLine({ title, where, "", "Tap Exit to cancel." }, "Name: ", false);
+  if (!name) return false;
+  std::string n = android::base::Trim(*name);
+  if (n.empty() || n == "." || n == ".." || n.find('/') != std::string::npos) {
+    device->GetUI()->Print("Invalid name.\n");
+    return false;
+  }
+  *out = n;
+  return true;
+}
+
+// Returns false if |path| no longer exists afterwards (deleted / renamed).
+bool ItemActions(Device* device, const std::string& path) {
+  auto ui = device->GetUI();
+  struct stat st {};
+  if (lstat(path.c_str(), &st) != 0) return false;
+  const bool dir = S_ISDIR(st.st_mode);
+  const std::string name = Basename(path);
+  std::vector<std::string> items;
+  std::vector<int> ids;  // 1 view, 2 install, 3 copy, 4 cut, 5 rename, 6 delete, 7 perms, 8 info
+  if (!dir && st.st_size <= 4 * 1024 * 1024) {
+    items.push_back("View as text");
+    ids.push_back(1);
+  }
+  if (!dir && android::base::EndsWithIgnoreCase(name, ".zip")) {
+    items.push_back("Install this zip");
+    ids.push_back(2);
+  }
+  items.push_back("Copy");
+  ids.push_back(3);
+  items.push_back("Cut (move)");
+  ids.push_back(4);
+  items.push_back("Rename");
+  ids.push_back(5);
+  items.push_back("Delete");
+  ids.push_back(6);
+  items.push_back("Permissions");
+  ids.push_back(7);
+  items.push_back("Info");
+  ids.push_back(8);
+  size_t c = Menu(device,
+                  { name, ModeString(st.st_mode) + "   " + (dir ? "folder" : HumanSize(st.st_size)) +
+                              "   " + TimeString(st.st_mtime) },
+                  items);
+  if (c >= items.size()) return true;
+  switch (ids[c]) {
+    case 1:
+      ui->ShowFile(path);
+      return true;
+    case 2: {
+      if (!Confirm(device, { "Install " + name + "?", "The package is installed like an OTA." })) {
+        return true;
+      }
+      ui->Print("\n-- Install %s ...\n", path.c_str());
+      std::string err;
+      update_bootloader_message({}, &err);
+      InstallResult r = InstallWithFuseFromPath(path, device);
+      ui->Print("Install finished with status %d%s.\n", r,
+                r == INSTALL_SUCCESS ? " (success; reboot when ready)" : "");
+      return true;
+    }
+    case 3:
+    case 4:
+      g_clip = { path, ids[c] == 4 };
+      ui->Print("%s %s; open the target folder and use Folder actions > Paste here.\n",
+                g_clip.move ? "Cut" : "Copied", name.c_str());
+      return true;
+    case 5: {
+      std::string n;
+      if (!AskName(device, "Rename " + name, ParentPath(path), &n)) return true;
+      std::string to = JoinPath(ParentPath(path), n);
+      if (access(to.c_str(), F_OK) == 0) {
+        ui->Print("%s already exists.\n", to.c_str());
+        return true;
+      }
+      if (rename(path.c_str(), to.c_str()) != 0) {
+        ui->Print("Rename failed: %s\n", strerror(errno));
+        return true;
+      }
+      ui->Print("Renamed to %s\n", n.c_str());
+      return false;
+    }
+    case 6: {
+      if (!Confirm(device, { "Delete " + name + "?", path,
+                             dir ? "The folder and everything in it will be removed."
+                                 : "This cannot be undone." })) {
+        return true;
+      }
+      Shell(ui, "rm -rf " + ShellQuote(path));
+      bool still = access(path.c_str(), F_OK) == 0;
+      ui->Print(still ? "Delete failed: %s\n" : "Deleted %s\n", name.c_str());
+      return still;
+    }
+    case 7: {
+      std::vector<std::string> modes{ "rw-r--r--\t644, normal file",
+                                      "rwxr-xr-x\t755, executable or folder",
+                                      "rw-------\t600, private", "rwxrwx---\t770, owner and group",
+                                      "rwxrwxrwx\t777, everyone" };
+      const char* octal[] = { "644", "755", "600", "770", "777" };
+      size_t m = Menu(device, { "Permissions", name + "   now " + ModeString(st.st_mode) }, modes);
+      if (m < modes.size()) {
+        Shell(ui, std::string("chmod ") + octal[m] + " " + ShellQuote(path), 30);
+        ui->Print("chmod %s %s\n", octal[m], name.c_str());
+      }
+      return true;
+    }
+    case 8:
+      ShowInfo(ui, path);
+      return true;
+  }
+  return true;
+}
+
+// Folder actions for |dir|; may change |dir| (e.g. after deleting it).
+void FolderActions(Device* device, std::string* dir) {
+  auto ui = device->GetUI();
+  std::vector<std::string> items{ "New folder" };
+  std::vector<int> ids{ 1 };
+  if (!g_clip.path.empty() && access(g_clip.path.c_str(), F_OK) == 0) {
+    items.push_back(std::string("Paste here\t") + (g_clip.move ? "move " : "copy ") + g_clip.path);
+    ids.push_back(2);
+  }
+  if (*dir != "/") {
+    items.push_back("Copy");
+    ids.push_back(3);
+    items.push_back("Cut (move)");
+    ids.push_back(4);
+    items.push_back("Rename");
+    ids.push_back(5);
+    items.push_back("Delete");
+    ids.push_back(6);
+  }
+  items.push_back("Info");
+  ids.push_back(7);
+  size_t c = Menu(device, { "Folder actions", *dir }, items);
+  if (c >= items.size()) return;
+  switch (ids[c]) {
+    case 1: {
+      std::string n;
+      if (!AskName(device, "New folder", *dir, &n)) return;
+      std::string p = JoinPath(*dir, n);
+      if (mkdir(p.c_str(), 0775) != 0) {
+        ui->Print("mkdir failed: %s\n", strerror(errno));
+        return;
+      }
+      MatchParentOwnership(ui, p);
+      ui->Print("Created %s\n", p.c_str());
+      return;
+    }
+    case 2: {
+      std::string target = JoinPath(*dir, Basename(g_clip.path));
+      if (target == g_clip.path) {
+        ui->Print("Source and target are the same.\n");
+        return;
+      }
+      if (android::base::StartsWith(*dir + "/", g_clip.path + "/")) {
+        ui->Print("Cannot paste a folder into itself.\n");
+        return;
+      }
+      if (access(target.c_str(), F_OK) == 0 &&
+          !Confirm(device, { "Overwrite " + Basename(target) + "?", target })) {
+        return;
+      }
+      ui->Print("\n-- %s %s -> %s\n", g_clip.move ? "Moving" : "Copying", g_clip.path.c_str(),
+                dir->c_str());
+      int rc = Shell(ui, std::string(g_clip.move ? "mv -f " : "cp -af ") + ShellQuote(g_clip.path) +
+                             " " + ShellQuote(*dir + "/"));
+      if (rc == 0) {
+        MatchParentOwnership(ui, target);
+        sync();
+        ui->Print("Done.\n");
+        if (g_clip.move) g_clip = {};
+      } else {
+        ui->Print("Failed (exit %d).\n", rc);
+      }
+      return;
+    }
+    case 7:
+      ShowInfo(ui, *dir);
+      return;
+    default: {
+      // Copy / cut / rename / delete the folder itself.
+      std::string self = *dir;
+      int id = ids[c];
+      if (id == 3 || id == 4) {
+        g_clip = { self, id == 4 };
+        ui->Print("%s %s; open the target folder and use Folder actions > Paste here.\n",
+                  g_clip.move ? "Cut" : "Copied", self.c_str());
+      } else if (!ItemActions(device, self)) {
+        *dir = ParentPath(self);
+      }
+      return;
+    }
+  }
+}
+
+}  // namespace
+
+void FileManager(Device* device) {
+  auto ui = device->GetUI();
+  // Where to start.
+  std::vector<std::string> labels, paths, vol_ids;
+  auto add = [&](const std::string& label, const std::string& path, const std::string& vol) {
+    labels.push_back(label);
+    paths.push_back(path);
+    vol_ids.push_back(vol);
+  };
+  if (access((std::string(kInternalStorage) + "/Android").c_str(), F_OK) == 0) {
+    add(std::string("Internal storage\t") + kInternalStorage, kInternalStorage, "");
+  }
+  add("/tmp\tRAM disk, adb push and pull", "/tmp", "");
+  if (IsMounted("/data")) add("/data\tDecrypted user data", "/data", "");
+  for (const char* mp : { "/mnt/system", "/vendor", "/odm", "/mnt/vendor/persist", "/metadata" }) {
+    if (IsMounted(mp)) add(std::string(mp) + "\tMounted partition", mp, "");
+  }
+  std::vector<VolumeInfo> volumes;
+  VolumeManager::Instance()->getVolumeInfo(volumes);
+  for (auto& vol : volumes) {
+    if (!vol.mMountable || android::base::StartsWith(vol.mId, "emulated")) continue;
+    add(vol.mLabel + "\t" + vol.mPath, vol.mPath, vol.mId);
+  }
+  add("/\tRoot of the recovery ramdisk", "/", "");
+  size_t c = Menu(device, { "Files", "Choose where to start" }, labels);
+  if (c >= labels.size()) return;
+  std::string mounted_volume;
+  if (!vol_ids[c].empty()) {
+    if (!VolumeManager::Instance()->volumeMount(vol_ids[c])) {
+      ui->Print("Failed to mount %s.\n", labels[c].c_str());
+      return;
+    }
+    mounted_volume = vol_ids[c];
+  }
+  const std::string start = paths[c];
+  std::string cwd = start;
+  size_t sel = 0;
+  while (true) {
+    struct Entry {
+      std::string name;
+      struct stat st;
+      bool dir;
+    };
+    std::vector<Entry> entries;
+    std::unique_ptr<DIR, decltype(&closedir)> d(opendir(cwd.c_str()), closedir);
+    if (!d) {
+      ui->Print("Cannot open %s: %s\n", cwd.c_str(), strerror(errno));
+      if (cwd == "/" || cwd == start) break;
+      cwd = ParentPath(cwd);
+      continue;
+    }
+    while (dirent* de = readdir(d.get())) {
+      std::string n = de->d_name;
+      if (n == "." || n == "..") continue;
+      Entry e{ n, {}, false };
+      if (lstat(JoinPath(cwd, n).c_str(), &e.st) != 0) continue;
+      e.dir = S_ISDIR(e.st.st_mode) || (S_ISLNK(e.st.st_mode) && IsDir(JoinPath(cwd, n)));
+      entries.push_back(e);
+    }
+    d.reset();
+    std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+      if (a.dir != b.dir) return a.dir;
+      return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+    });
+    std::vector<std::string> items{ "Folder actions\tNew folder, paste, rename, delete" };
+    const bool has_up = cwd != "/";
+    if (has_up) items.push_back("../\tUp to " + ParentPath(cwd));
+    for (const auto& e : entries) {
+      std::string sub = e.dir ? ModeString(e.st.st_mode) + "   " + TimeString(e.st.st_mtime)
+                              : HumanSize(e.st.st_size) + "   " + ModeString(e.st.st_mode) +
+                                    "   " + TimeString(e.st.st_mtime);
+      if (S_ISLNK(e.st.st_mode)) sub = "link   " + sub;
+      items.push_back(e.name + (e.dir ? "/" : "") + "\t" + sub);
+    }
+    std::string head2 = cwd + "   (" + std::to_string(entries.size()) + " items)";
+    if (!g_clip.path.empty()) {
+      head2 += "   clipboard: " + std::string(g_clip.move ? "cut " : "copy ") + Basename(g_clip.path);
+    }
+    sel = std::min(sel, items.size() - 1);
+    size_t chosen = Menu(device, { "Files", head2 }, items, sel);
+    if (chosen >= items.size()) {
+      // Back: up one level, leaving at the starting point.
+      if (cwd == start || cwd == "/") break;
+      cwd = ParentPath(cwd);
+      sel = 0;
+      continue;
+    }
+    sel = chosen;
+    if (chosen == 0) {
+      FolderActions(device, &cwd);
+      continue;
+    }
+    if (has_up && chosen == 1) {
+      cwd = ParentPath(cwd);
+      sel = 0;
+      continue;
+    }
+    const Entry& e = entries[chosen - (has_up ? 2 : 1)];
+    std::string path = JoinPath(cwd, e.name);
+    if (e.dir) {
+      cwd = path;
+      sel = 0;
+    } else {
+      ItemActions(device, path);
+    }
+  }
+  if (!mounted_volume.empty()) VolumeManager::Instance()->volumeUnmount(mounted_volume);
+  sync();
 }

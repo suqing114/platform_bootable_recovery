@@ -811,6 +811,7 @@ void ScreenRecoveryUI::draw_screen_locked() {
 // Draws the menu and text buffer on the screen. Should only be called with updateMutex locked.
 void ScreenRecoveryUI::draw_menu_and_text_buffer_locked(
     const std::vector<std::string>& help_message) {
+  if (draw_themed_menu_locked()) return;
   int y = margin_height_;
 
   if (menu_) {
@@ -1081,6 +1082,8 @@ bool ScreenRecoveryUI::Init(const std::string& locale) {
 
   // set the callback for hall sensor event
   (void)ev_sync_sw_state([this](auto&& a, auto&& b) { return this->SetSwCallback(a, b);});
+
+  theme_init();
 
   return true;
 }
@@ -1364,6 +1367,7 @@ int ScreenRecoveryUI::SelectMenu(const Point& p) {
 
   int new_sel = Device::kNoAction;
   std::lock_guard<std::mutex> lg(updateMutex);
+  if (menu_ && theme_active_) return theme_select(point);
   if (menu_) {
     if (!menu_->IsMain()) {
       // Back arrow hitbox

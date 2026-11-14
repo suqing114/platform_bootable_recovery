@@ -61,6 +61,10 @@ const GRFont* gr_menu_font() {
   return gr_font_menu;
 }
 
+const GRSurface* gr_draw_surface() {
+  return gr_draw;
+}
+
 PixelFormat gr_pixel_format() {
   return pixel_format;
 }

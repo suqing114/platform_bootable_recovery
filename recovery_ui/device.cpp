@@ -30,27 +30,41 @@
 typedef std::pair<std::string, Device::BuiltinAction> menu_action_t;
 
 static std::vector<std::string> g_main_header{};
+// liuqin theme: the home screen draws these as tiles; "Reboot system now" is the
+// wide button at the bottom.
 static std::vector<menu_action_t> g_main_actions{
   { "Reboot system now", Device::REBOOT },
-  { "Apply update", Device::APPLY_UPDATE },
-  { "Factory reset", Device::MENU_WIPE },
+  { "Install", Device::APPLY_UPDATE },
+  { "Wipe", Device::MENU_WIPE },
+  { "Backup", Device::MENU_BACKUP },
+  { "Data", Device::MENU_DATA },
+  { "Terminal", Device::TERMINAL },
   { "Tools", Device::MENU_TOOLS },
   { "Advanced", Device::MENU_ADVANCED },
+  { "Files", Device::FILE_MANAGER },
 };
 
 static std::vector<std::string> g_tools_header{ "Tools" };
 static std::vector<menu_action_t> g_tools_actions{
-  { "Backup partitions", Device::BACKUP_PARTITIONS },
-  { "Flash image to partition", Device::FLASH_IMAGE },
   { "Mount partitions", Device::MOUNT_PARTITIONS },
   { "Export logs", Device::EXPORT_LOGS },
   { "Switch active slot", Device::SWITCH_SLOT },
+};
+
+static std::vector<std::string> g_backup_header{ "Backup" };
+static std::vector<menu_action_t> g_backup_actions{
+  { "Backup partitions", Device::BACKUP_PARTITIONS },
+  { "Flash image to partition", Device::FLASH_IMAGE },
+};
+
+static std::vector<std::string> g_data_header{ "Data",
+                                              "/data is metadata-encrypted; internal storage needs the "
+                                              "lock-screen PIN." };
+static std::vector<menu_action_t> g_data_actions{
   { "Unlock internal storage (PIN)", Device::UNLOCK_CE },
   { "Decrypt /data (read-only)", Device::DECRYPT_DATA_RO },
   { "Mount /data read-write", Device::MOUNT_DATA_RW },
-  { "Wipe Dalvik / ART cache", Device::WIPE_DALVIK },
   { "Unmount /data", Device::UNMOUNT_DATA },
-  { "Terminal", Device::TERMINAL },
 };
 
 static std::vector<std::string> g_advanced_header{ "Advanced options" };
@@ -67,11 +81,12 @@ static std::vector<menu_action_t> g_advanced_actions{
   { "Power off", Device::SHUTDOWN },
 };
 
-static std::vector<std::string> g_wipe_header{ "Factory reset" };
+static std::vector<std::string> g_wipe_header{ "Wipe" };
 static std::vector<menu_action_t> g_wipe_actions{
   { "Format data/factory reset", Device::WIPE_DATA },
   { "Format cache partition", Device::WIPE_CACHE },
   { "Format system partition", Device::WIPE_SYSTEM },
+  { "Wipe Dalvik / ART cache", Device::WIPE_DALVIK },
 };
 
 static std::vector<menu_action_t>* current_menu_ = &g_main_actions;
@@ -123,6 +138,10 @@ const std::vector<std::string>& Device::GetMenuHeaders() {
       return g_advanced_header;
   if (current_menu_ == &g_tools_actions)
       return g_tools_header;
+  if (current_menu_ == &g_backup_actions)
+      return g_backup_header;
+  if (current_menu_ == &g_data_actions)
+      return g_data_header;
   return g_main_header;
 }
 
@@ -139,6 +158,12 @@ Device::BuiltinAction Device::InvokeMenuItem(size_t menu_position) {
         break;
       case Device::BuiltinAction::MENU_TOOLS:
         current_menu_ = &g_tools_actions;
+        break;
+      case Device::BuiltinAction::MENU_BACKUP:
+        current_menu_ = &g_backup_actions;
+        break;
+      case Device::BuiltinAction::MENU_DATA:
+        current_menu_ = &g_data_actions;
         break;
       default:
         break;

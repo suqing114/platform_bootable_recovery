@@ -165,6 +165,9 @@ GRRotation gr_get_rotation();
 // Returns the current PixelFormat being used.
 PixelFormat gr_pixel_format();
 
+// liuqin: the surface currently being drawn into (for screenshots).
+const GRSurface* gr_draw_surface();
+
 //
 // Input events.
 //

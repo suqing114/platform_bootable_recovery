@@ -35,6 +35,7 @@ cc_library {
         "ethernet_ui.cpp",
         "screen_ui.cpp",
         "screen_ui_keyboard.cpp",
+        "screen_ui_theme.cpp",
         "stub_ui.cpp",
         "ui.cpp",
         "vr_ui.cpp",

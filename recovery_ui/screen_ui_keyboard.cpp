@@ -164,9 +164,11 @@ void ScreenRecoveryUI::draw_readline_locked() {
   const auto rows = Layout(rl_mode_);
   const int key_h = std::min(w / 10, h / 14);
   const int kb_h = key_h * static_cast<int>(rows.size());
-  const int kb_top = h - kb_h - margin_height_;
+  const int kb_top = h - kb_h - margin_height_ - 28;
 
-  gr_color(25, 25, 25, 255);
+  gr_color(13, 20, 23, 255);
+  gr_fill(0, 0, w, h);
+  gr_color(18, 27, 31, 255);
   gr_fill(0, kb_top - gap, w, h);
 
   rl_hit_.clear();
@@ -179,21 +181,20 @@ void ScreenRecoveryUI::draw_readline_locked() {
     float x = 0;
     const int y = kb_top + static_cast<int>(r) * key_h;
     for (const auto& k : rows[r]) {
-      const int x0 = static_cast<int>(x / total * w);
+      const int x0 = 24 + static_cast<int>(x / total * (w - 48));
       x += k.weight;
-      const int x1 = static_cast<int>(x / total * w);
+      const int x1 = 24 + static_cast<int>(x / total * (w - 48));
       if (k.code == kKbSpacer) continue;
       const bool special = k.code < 0 || k.code == ' ';
       const bool active = (k.code == kKbShift && rl_mode_ == 1) || (k.code == kKbSym && rl_mode_ == 2);
-      if (active) {
-        gr_color(40, 120, 180, 255);
-      } else if (special) {
-        gr_color(55, 60, 70, 255);
-      } else {
-        gr_color(75, 75, 75, 255);
-      }
-      gr_fill(x0 + gap, y + gap, x1 - gap, y + key_h - gap);
-      gr_color(255, 255, 255, 255);
+      const bool enter = k.code == kKbEnter;
+      Rgb3 fill = (active || enter) ? Rgb3{ 57, 197, 187 }
+                  : special         ? Rgb3{ 24, 58, 58 }
+                                    : Rgb3{ 38, 54, 60 };
+      theme_fill_round(x0 + gap, y + gap, x1 - x0 - 2 * gap, key_h - 2 * gap, 24, fill);
+      if (active || enter) gr_color(4, 52, 44, 255);
+      else if (special) gr_color(127, 184, 178, 255);
+      else gr_color(232, 246, 244, 255);
       int tw = gr_measure(kfont, k.label.c_str());
       gr_text(kfont, x0 + (x1 - x0 - tw) / 2, y + (key_h - kfh) / 2, k.label.c_str(), false);
       rl_hit_.push_back({ Point(x0, y), Point(x1, y + key_h), k.code });
@@ -203,34 +204,36 @@ void ScreenRecoveryUI::draw_readline_locked() {
   // --- input line, just above the keyboard ---
   const int in_h = kfh + gap * 4;
   const int in_top = kb_top - gap - in_h;
-  gr_color(45, 45, 45, 255);
-  gr_fill(0, in_top, w, kb_top - gap);
+  theme_fill_round(margin_width_ + 24, in_top + gap, w - 2 * margin_width_ - 48,
+                   kb_top - 2 * gap - in_top, 28, { 57, 197, 187 });
+  theme_fill_round(margin_width_ + 28, in_top + gap + 4, w - 2 * margin_width_ - 56,
+                   kb_top - 2 * gap - in_top - 8, 24, { 22, 32, 36 });
   std::string shown = rl_masked_ ? std::string(rl_input_.size(), '*') : rl_input_;
   std::string line = rl_prompt_ + shown + "_";
-  const int max_chars = std::max(1, (w - 2 * margin_width_) / std::max(1, kfw));
+  const int max_chars = std::max(1, (w - 2 * margin_width_ - 128) / std::max(1, kfw));
   if (static_cast<int>(line.size()) > max_chars) line = line.substr(line.size() - max_chars);
   gr_color(255, 255, 255, 255);
-  gr_text(kfont, margin_width_, in_top + (in_h - kfh) / 2, line.c_str(), true);
+  gr_text(kfont, margin_width_ + 64, in_top + (in_h - kfh) / 2, line.c_str(), true);
 
   // --- scrollback text (bottom-aligned above the input line) ---
   const GRFont* tfont = gr_sys_font();
-  const int cols = std::max(1, (w - 2 * margin_width_) / std::max(1, char_width_));
+  const int cols = std::max(1, (w - 2 * margin_width_ - 96) / std::max(1, char_width_));
   const auto wrapped = Wrap(rl_lines_, cols);
-  const int top = margin_height_;
+  const int top = margin_height_ + 48;
   const int visible = std::max(0, (in_top - gap - top) / std::max(1, char_height_));
   const int max_scroll = std::max(0, static_cast<int>(wrapped.size()) - visible);
   rl_scroll_ = std::clamp(rl_scroll_, 0, max_scroll);
   const int end = static_cast<int>(wrapped.size()) - rl_scroll_;
   const int begin = std::max(0, end - visible);
-  gr_color(220, 220, 220, 255);
+  gr_color(184, 199, 197, 255);
   int y = in_top - gap - (end - begin) * char_height_;
   for (int i = begin; i < end; ++i, y += char_height_) {
-    gr_text(tfont, margin_width_, y, wrapped[i].c_str(), false);
+    gr_text(tfont, margin_width_ + 48, y, wrapped[i].c_str(), false);
   }
   if (rl_scroll_ > 0) {
-    gr_color(40, 120, 180, 255);
+    gr_color(57, 197, 187, 255);
     std::string more = "-- " + std::to_string(rl_scroll_) + " more lines below (swipe/volume) --";
-    gr_text(tfont, margin_width_, in_top - gap - char_height_, more.c_str(), true);
+    gr_text(tfont, margin_width_ + 48, in_top - gap - char_height_, more.c_str(), true);
   }
 }
 
